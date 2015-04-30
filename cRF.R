@@ -14,11 +14,11 @@
 #load dependencies
 
 ### setting path of repo folder.
-getwd()
 setwd("/Users/bikash/repos/kaggle/RestaurantRevenuePrediction/")
+#setwd("/home/ekstern/haisen/bikash/kaggle/RestaurantRevenuePrediction/")
 
 library(party)
-library(Boruta)
+#library(Boruta)
 #load data
 train = read.csv("data/train.csv", header = TRUE, stringsAsFactors = FALSE)
 test = read.csv("data/test.csv", header = TRUE, stringsAsFactors = FALSE)
@@ -40,57 +40,64 @@ train$years_open <- as.numeric(difftime(competition_start,
 test$years_open <- as.numeric(difftime(competition_start,
                                        strptime(test$Open.Date, format='%m/%d/%Y'), units='days')/365)
 
-
-## preprocessing
-train$TypeNo[train$Type == "DT"] = 1
-train$TypeNo[train$Type == "FC"] = 2
-train$TypeNo[train$Type == "IL"] = 3
-train$TypeNo[train$Type == "MB"] = 4
-
-test$TypeNo[test$Type == "DT"] = 1
-test$TypeNo[test$Type == "FC"] = 2
-test$TypeNo[test$Type == "IL"] = 3
-test$TypeNo[test$Type == "MB"] = 4
-
-train$CityGp[train$City.Group == "Big Cities"] = 1
-train$CityGp[train$City.Group == "Other"] = 2
-
-test$CityGp[test$City.Group == "Big Cities"] = 1
-test$CityGp[test$City.Group == "Other"] = 2
-
-## City
-
-
-train1 = data.frame()
-## Divide data in big cities and other
-train1[train$City.Group == "Big Cities"] = train
-train1[train$City.Group == "Other"] = train
-
-test$CityGp[test$City.Group == "Big Cities"] = 1
-test$CityGp[test$City.Group == "Other"] = 2
-
-# remove unneeded columns
-train$City <- NULL
-train$Open.Date <- NULL
-train$City.Group <- NULL
-train$Type <- NULL
-test$City <- NULL
-test$Open.Date <- NULL
-test$City.Group <- NULL
-test$Type <- NULL
-
-
-
-set.seed(415)
-n.train <- nrow(train)
 test$revenue <- 1
 myData <- rbind(train, test)
+## determine the age of resturant
+myData$is.New<-ifelse(round(myData$years_open,0)<=2,1,0)
+myData$is.Old<-ifelse(round(myData$years_open,0)>=3,1,0)
+
+
+## preprocessing
+myData$TypeNo[train$Type == "DT"] = 1
+myData$TypeNo[myData$Type == "FC"] = 2
+myData$TypeNo[myData$Type == "IL"] = 3
+myData$TypeNo[myData$Type == "MB"] = 4
+# 
+myData$CityGp[myData$City.Group == "Big Cities"] = 1
+myData$CityGp[myData$City.Group == "Other"] = 2
+# 
+library(gtools)
+if(invalid(myData$P2)) print("yes:")
+
+# remove unneeded columns
+myData$City <- NULL
+myData$Open.Date <- NULL
+myData$City.Group <- NULL
+myData$Type <- NULL
+
+myData$revenue <- log(myData$revenue)
+
+data5<-myData[1:45]
+library(Boruta)
+important <- Boruta(revenue~., data=data5[1:137, ])
+
+set.seed(415)
+
+# remove outliers
+train <- train[train$revenue < 16000000,]
+
+rf = cforest(revenue ~., data = train[,-1], controls=cforest_unbiased(ntree=2000))
+
+Prediction = predict(rf, test[,-1], OOB=TRUE, type = "response")
+
+id<-test[,1]
+submission<-cbind(id,Prediction)
+colnames(submission)[2] <- "Prediction"
+
+write.csv(submission, "output/conditional_forest_tree_1000.csv", row.names = FALSE, quote = FALSE)
+
+
+
+
+n.train <- nrow(train)
+test$revenue <- 1
+#myData <- rbind(train, test)
 #Log Transform P Variables and Revenue
-myData[, paste("P", 1:37, sep="")] <- log(1 +myData[, paste("P", 1:37, sep="")])
+#myData[, paste("P", 1:37, sep="")] <- log(1 +myData[, paste("P", 1:37, sep="")])
 
 
-train$revenue <- log(train$revenue)
-important <- Boruta(revenue~., data=myData[1:n.train, ])
+#train$revenue <- log(train$revenue)
+#important <- Boruta(revenue~., data=myData[1:n.train, ])
 
 
 # cities = as.factor(train$cities)
@@ -98,6 +105,7 @@ important <- Boruta(revenue~., data=myData[1:n.train, ])
 # out <- data.frame(id = test$Id, Prediction=cities)
 # write.csv(out, "data/cities.csv", row.names = FALSE, quote = FALSE)
 # 
+
 
 set.seed(24501)
 #Conditional Inference Tree
