@@ -21,7 +21,7 @@ train$rev_cluster[c(rows-2,rows)] <- 'P'
 test$rev_cluster <- 'Z'
 test$revenue <- NaN
 rev_cluster <- ddply(train,.(rev_cluster),summarize,max=max(revenue), min=min(revenue), count=length(revenue))
-rev_cluster$pct<-rev_cluster$max/rev_cluster$min
+rev_cluster$pct <- rev_cluster$max/rev_cluster$min
 combined <- rbind(test,train)
 
 competition_start <- strptime('23.03.2015', format='%d.%m.%Y')

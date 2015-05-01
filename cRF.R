@@ -1,5 +1,4 @@
 #################################################################################################
-#################################################################################################
 ## Author: Bikash Agrawal
 ## Date: 12th March Feb 2015
 ## Email: er.bikash21@gmail.com
@@ -18,7 +17,10 @@ setwd("/Users/bikash/repos/kaggle/RestaurantRevenuePrediction/")
 #setwd("/home/ekstern/haisen/bikash/kaggle/RestaurantRevenuePrediction/")
 
 library(party)
-#library(Boruta)
+library(e1071)
+library(lubridate)
+library(Boruta)
+library(gtools)
 #load data
 train = read.csv("data/train.csv", header = TRUE, stringsAsFactors = FALSE)
 test = read.csv("data/test.csv", header = TRUE, stringsAsFactors = FALSE)
@@ -43,48 +45,122 @@ test$years_open <- as.numeric(difftime(competition_start,
 test$revenue <- 1
 myData <- rbind(train, test)
 ## determine the age of resturant
-myData$is.New<-ifelse(round(myData$years_open,0)<=2,1,0)
-myData$is.Old<-ifelse(round(myData$years_open,0)>=3,1,0)
+myData$is.New<-ifelse(round(myData$years_open,0)<=1,1,0)
+myData$is.Mature<-ifelse(round(myData$years_open,0)>1 & myData$years_open<5,1,0)
+myData$is.Old<-ifelse(round(myData$years_open,0)>=5,1,0)
 
 
 ## preprocessing
-myData$TypeNo[train$Type == "DT"] = 1
-myData$TypeNo[myData$Type == "FC"] = 2
-myData$TypeNo[myData$Type == "IL"] = 3
-myData$TypeNo[myData$Type == "MB"] = 4
+myData$Type1<-NULL
+myData$Type <- as.character(myData$Type)
+myData$Type1[myData$Type=="DT"] = 1
+myData$Type1[myData$Type == "FC"] = 2
+myData$Type1[myData$Type == "IL"] = 3
+myData$Type1[myData$Type == "MB"] = 4
+myData$Type1[myData$Type == train$Type[125]] = 1
 # 
 myData$CityGp[myData$City.Group == "Big Cities"] = 1
 myData$CityGp[myData$City.Group == "Other"] = 2
 # 
-library(gtools)
-if(invalid(myData$P2)) print("yes:")
+
+#if(invalid(myData$P2)) print("yes:")
 
 # remove unneeded columns
 myData$City <- NULL
 myData$Open.Date <- NULL
 myData$City.Group <- NULL
 myData$Type <- NULL
+#myData$is.New <- NULL
+#myData$is.Old <- NULL
+# remove outliers
+myData <- myData[myData$revenue < 16000000,]
 
 myData$revenue <- log(myData$revenue)
 
-data5<-myData[1:45]
-library(Boruta)
-important <- Boruta(revenue~., data=data5[1:137, ])
 
-set.seed(415)
+#important <- Boruta(revenue~., data=myData[1:137, ])
 
-# remove outliers
-train <- train[train$revenue < 16000000,]
 
-rf = cforest(revenue ~., data = train[,-1], controls=cforest_unbiased(ntree=2000))
+## no of taining set
+n.train <- nrow(train)
+print(n.train)
+train_cols<-myData[,c(2:38,40:44)]
+labels<-as.matrix(myData[,39])
+mydata = myData[,-1]
+set.seed(2234)
 
-Prediction = predict(rf, test[,-1], OOB=TRUE, type = "response")
+
+rf = cforest(revenue ~., data = mydata[1:135,], controls=cforest_unbiased(ntree=1000))
+
+#SVM
+svm.model<- svm(x=as.matrix(train_cols),y=labels, cost=10,scale=TRUE,type="eps-regression")
+#svm.model<-svm(revenue~., data=mydata[1:135, ], cost = 75, gamma=0.001, kernel = 'radial')
+
+#Make a Prediction
+rf.pred = predict(rf, mydata[-c(1:135), ], OOB=TRUE, type = "response")
+svm.pred <-  predict(svm.model, mydata[-c(1:135), ])
+
+
+## combine model
+pred = rowMeans(cbind(exp(rf.pred),exp(svm.pred)))
+
 
 id<-test[,1]
-submission<-cbind(id,Prediction)
+submission<-cbind(id,pred)
 colnames(submission)[2] <- "Prediction"
 
-write.csv(submission, "output/conditional_forest_tree_1000.csv", row.names = FALSE, quote = FALSE)
+write.csv(submission, "output/conditional_forest_SVM.csv", row.names = FALSE, quote = FALSE)
+
+
+
+##importance variable plot
+library(ggplot2)
+library(randomForest)
+rf <- randomForest(revenue~., data=mydata[1:135, ], importance=TRUE)
+imp <- importance(rf, type=1)
+featureImportance <- data.frame(Feature=row.names(imp), Importance=imp[,1])
+
+p <- ggplot(featureImportance, aes(x=reorder(Feature, Importance), y=Importance)) +
+  geom_bar(stat="identity", fill="#53cfff") +
+  coord_flip() + 
+  theme_light(base_size=20) +
+  xlab("Importance") +
+  ylab("") + 
+  ggtitle("Random Forest Feature Importance\n") +
+  theme(plot.title=element_text(size=18))
+
+ggsave("2_feature_importance.png", p)
+
+## t-SNE visualixation
+numeric_features <- train[,c(-1,-2,-3,-4,-5,-43)]
+tsne <- Rtsne(as.matrix(numeric_features), check_duplicates = FALSE, pca = TRUE, 
+              perplexity=30, theta=0.5, dims=2)
+
+embedding <- as.data.frame(tsne$Y)
+embedding$Revenue  <- train$revenue/1e6
+embedding$Type     <- train$Type
+embedding$CityType <- train[["City Group"]]
+
+p <- ggplot(embedding, aes(x=V1, y=V2, color=Revenue, shape=CityType)) +
+  geom_point(size=4) +
+  scale_colour_gradientn(colours=c("#3288bd","#66c2a5","#abdda4","#e6f598","#fee08b","#fdae61","#f46d43","#d53e4f"), name="Revenue ($M)") + 
+  xlab("") + ylab("") +
+  theme_light(base_size=20) +
+  ggtitle("t-SNE Restaurant Visualization") + 
+  theme(strip.background = element_blank(),
+        strip.text.x     = element_blank(),
+        axis.text.x      = element_blank(),
+        axis.text.y      = element_blank(),
+        axis.ticks       = element_blank(),
+        axis.line        = element_blank(),
+        panel.border     = element_blank())
+
+ggsave("tsne.png", p, height=8, width=8, units="in")
+
+
+
+
+
 
 
 
