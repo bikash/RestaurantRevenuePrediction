@@ -76,11 +76,7 @@ myData$Type <- NULL
 myData <- myData[myData$revenue < 16000000,]
 
 myData$revenue <- log(myData$revenue)
-
-
 #important <- Boruta(revenue~., data=myData[1:137, ])
-
-
 ## no of taining set
 n.train <- nrow(train)
 print(n.train)
@@ -89,6 +85,12 @@ labels<-as.matrix(myData[,39])
 mydata = myData[,-1]
 set.seed(2234)
 
+important <- Boruta(revenue~., data=mydata[1:135, ])
+
+#Random Forest
+set.seed(24501)
+model <- cforest(revenue~., data=myData[1:135, c(important$finalDecision != "Rejected", TRUE)], controls=cforest_unbiased(ntree=1000))
+
 
 rf = cforest(revenue ~., data = mydata[1:135,], controls=cforest_unbiased(ntree=1000))
 
@@ -96,20 +98,46 @@ rf = cforest(revenue ~., data = mydata[1:135,], controls=cforest_unbiased(ntree=
 svm.model<- svm(x=as.matrix(train_cols),y=labels, cost=10,scale=TRUE,type="eps-regression")
 #svm.model<-svm(revenue~., data=mydata[1:135, ], cost = 75, gamma=0.001, kernel = 'radial')
 
+## GBM
+library(gbm)
+gbm.fit <- gbm(revenue~.,data=mydata[1:135,], cv.folds=10, n.trees=5000, distribution="gaussian", interaction.depth=3, bag.fraction=0.5, train.fraction=1.0, shrinkage=0.05, keep.data=TRUE)
+
+## neural net
+library(caret)
+library(nnet)
+train<-as.factor(train)
+fit <- ctree(revenue ~ ., data=mydata[1:135,], controls = ctree_control(mincriterion = 0, minsplit = 8, minbucket = 6))
+newNet<-nnet(revenue~ . ,data=mydata[1:135,], size=2, type = "class")
+nn.pred <- predict(newNet, newdata=mydata[-c(1:135), ])
+summary(nn.pred)
+# pred<-factor(pred,levels=unlist(strsplit('A B C D E F G H I J K L M N O P',' ')))
+
+
+
 #Make a Prediction
 rf.pred = predict(rf, mydata[-c(1:135), ], OOB=TRUE, type = "response")
 svm.pred <-  predict(svm.model, mydata[-c(1:135), ])
+gbm.pred <-  predict(gbm.fit, mydata[-c(1:135), ])
 
+cf.pred = predict(rf, mydata[-c(1:135), ], OOB=TRUE, type = "response")
+
+## randomForest
+library(randomForest)
+fit_rf<- randomForest(revenue~.,data=mydata[1:135,],type="regression",prox=TRUE, ntree=1000)
+rf1.pred<-predict(fit_rf, mydata[-c(1:135), ])
 
 ## combine model
-pred = rowMeans(cbind(exp(rf.pred),exp(svm.pred)))
+pred = rowMeans(cbind(exp(rf.pred),exp(cf.pred)))
+
 
 
 id<-test[,1]
 submission<-cbind(id,pred)
 colnames(submission)[2] <- "Prediction"
 
-write.csv(submission, "output/conditional_forest_SVM.csv", row.names = FALSE, quote = FALSE)
+write.csv(submission, "output/conditional_forest_imp.csv", row.names = FALSE, quote = FALSE)
+
+
 
 
 
@@ -132,6 +160,7 @@ p <- ggplot(featureImportance, aes(x=reorder(Feature, Importance), y=Importance)
 ggsave("2_feature_importance.png", p)
 
 ## t-SNE visualixation
+library(Rtsne)
 numeric_features <- train[,c(-1,-2,-3,-4,-5,-43)]
 tsne <- Rtsne(as.matrix(numeric_features), check_duplicates = FALSE, pca = TRUE, 
               perplexity=30, theta=0.5, dims=2)
@@ -139,7 +168,7 @@ tsne <- Rtsne(as.matrix(numeric_features), check_duplicates = FALSE, pca = TRUE,
 embedding <- as.data.frame(tsne$Y)
 embedding$Revenue  <- train$revenue/1e6
 embedding$Type     <- train$Type
-embedding$CityType <- train[["City Group"]]
+embedding$CityType <- train[["City.Group"]]
 
 p <- ggplot(embedding, aes(x=V1, y=V2, color=Revenue, shape=CityType)) +
   geom_point(size=4) +
