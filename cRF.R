@@ -85,6 +85,7 @@ labels<-as.matrix(myData[,39])
 mydata = myData[,-1]
 set.seed(2234)
 
+
 important <- Boruta(revenue~., data=mydata[1:135, ])
 
 #Random Forest
