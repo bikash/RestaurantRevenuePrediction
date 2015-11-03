@@ -76,6 +76,7 @@ myData$Type <- NULL
 myData <- myData[myData$revenue < 16000000,]
 
 myData$revenue <- log(myData$revenue)
+
 #important <- Boruta(revenue~., data=myData[1:137, ])
 ## no of taining set
 n.train <- nrow(train)
